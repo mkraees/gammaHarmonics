@@ -1,176 +1,117 @@
-subjectName = 'tutu'; expType = 'Color'; stimType = 'Red';
-% subjectName = 'alpa'; expType = 'Color'; stimType = 'Red';
-% subjectName = 'alpa'; expType = 'Length'; stimType = 'con100';
-% subjectName = 'kesari'; expType = 'Length'; stimType = 'con100';
+function figure2Gen(subjectName, expType, stimType)
+% Generate Figure 2
 
-[highRMSElectrodes, goodPos, Fs, stPos, blPos, mt, folderLFP, timeVals] = getSubjectDetails(subjectName, expType, stimType);
+    plotsFolder = '/home/me/GammaHarmonicData/Plots';
+    makeDirectory(plotsFolder);
+    saveFolder = '/home/me/GammaHarmonicData/savedData';
+    makeDirectory(saveFolder);
+    
+    if isfile(fullfile(saveFolder,[subjectName expType stimType '.mat']))
+        load(fullfile(saveFolder,[subjectName expType stimType '.mat'])); %#ok<LOAD>
+        disp('Variables loaded from Memory')
+    else
+        clearvars -except subjectName expType stimType saveFolder plotsFolder
+        [highRMSElectrodes, goodPos, Fs, stPos, blPos, mt, folderLFP, timeVals, stimPeriod, baselinePeriod, folderSourceString] = getSubjectDetails(subjectName, expType, stimType); %#ok<ASGLU>
+        [freqVals,psdST,psdBL,baseCorrectedLog10PSD, theta, RHO, stLFP, gammaSig, harmonicSig, gammaFreq, harmonicFreq, gammaAmp, harmonicAmp] = getPSDandPhase(highRMSElectrodes,folderLFP,goodPos,stPos,blPos,mt,Fs); %#ok<ASGLU>
+        save(fullfile(saveFolder,[subjectName expType stimType '.mat']));
+        disp('Variables Saved')
+    end
 
-folderPair = fullfile('/home/me/GammaHarmonicData/ElecTrialPair');
-PairStruct = load(fullfile(folderPair,[subjectName expType stimType 'GoodElectrodeTrialPair']));
-trialPair = PairStruct.ElectrodeTrialPair;
+    G = find(gammaAmp >= median(median(gammaAmp)));
+    H = find(harmonicAmp >= median(median(harmonicAmp)));
 
-elec = zeros(1,length(trialPair)); trialInd = zeros(1,length(trialPair));
-for i = 1:length(trialPair)
-    elec(i) = trialPair{i}(1);
-    trialInd(i) = trialPair{i}(2);
-end
-electrodeNum = mode(elec);
-TrialInd = mode(trialInd);
-TrialNum = goodPos(1);
+    GH = intersect(G,H);
 
-subjectID = [subjectName expType];
+    A = zeros(length(GH),2);
+    for i = 1:length(GH)
+        [trialInd, elecInd] = find(gammaAmp == gammaAmp(GH(i)));
+        A(i,1) = elecInd;
+        A(i,2) = trialInd;
+    end
 
-% SingleTrial
-i = electrodeNum;
-load(fullfile(folderLFP,['elec' num2str(i)]),'analogData');
-singleTrialLFP = analogData(TrialNum,stPos)';
-[psdST, freqVals] = mtspectrumc(singleTrialLFP,mt); 
-[singleTrialGamma, singleTrialHarmonic] = findGammaPeak(psdST, freqVals);
+    selectedElecIndices = unique(A(:,1));
+    selectedTrialIndices = unique(A(:,2));
+    elecIndSelected = mode(A(:,1));
+    trialIndSelected = mode(A(:,2));
 
-[freqVals, meanPSDST,meanPSDBL] = meanPSD(highRMSElectrodes, goodPos, folderLFP, stPos, blPos, mt);
-[freqGamma, freqHarmonic] = findGammaPeak(meanPSDST, freqVals);
 
-% PSD
-figure('units','normalized','outerposition',[0 0 1 1])
-pos1 = [0.1 0.6 0.35 0.3];
-subplot('Position',pos1)
-plot(freqVals,log10(meanPSDBL)','k','LineWidth',1.5)
-hold on
-plot(freqVals,log10(meanPSDST)','r','LineWidth',1.5)
-plot(freqGamma,log10(meanPSDST(find(freqVals == freqGamma))),'ro','HandleVisibility','off');
-text(freqGamma,log10(meanPSDST(find(freqVals == freqGamma))),[' G = '  num2str(freqGamma) 'Hz']);
-plot(freqHarmonic,log10(meanPSDST(find(freqVals == freqHarmonic))),'ro','HandleVisibility','off');
-text(freqHarmonic,log10(meanPSDST(find(freqVals == freqHarmonic))),[' H = ' num2str(freqHarmonic) 'Hz']);
+    % [trialIndSelected, elecIndSelected] = find(harmonicAmp == max(max(harmonicAmp)));
 
-plot(freqVals,log10(psdST)',':b','LineWidth',1.5)
-plot(singleTrialGamma,log10(psdST(find(freqVals == singleTrialGamma))),'bo','HandleVisibility','off');
-plot(singleTrialHarmonic,log10(psdST(find(freqVals == singleTrialHarmonic))),'bo','HandleVisibility','off')
+    % PSD
+    meanPSDBL = squeeze(mean(mean(psdBL,2),3));
+    meanPSDST = squeeze(mean(mean(psdST,2),3));
+    [freqGamma, freqHarmonic] = findGammaPeak(meanPSDST, freqVals);
+    [singleTrialGamma, singleTrialHarmonic] = findGammaPeak(psdST(:,trialIndSelected,elecIndSelected), freqVals);
 
-legend('BaseLine', 'Stimulus', 'SingleTrial', 'Location', 'Best')
-xlim([0 150])
-xlabel('frequency (Hz)'); ylabel('log10(PSD)');
-title([subjectID '-' stimType ' PSD'])
-hold off;
+    figure('units','normalized','outerposition',[0 0 1 1])
+    pos1 = [0.1 0.6 0.35 0.3];
+    subplot('Position',pos1)
 
-% Raw LFP
-pos2 = [0.55 0.6 0.4 0.3];
-subplot('Position',pos2)
-stimTime = timeVals(stPos);
-[~, ~, gammaSig, harmonicSig] = getGammaPhaseDiff(singleTrialLFP, singleTrialGamma, singleTrialHarmonic, Fs);
-hold on
-plot(stimTime, singleTrialLFP, 'b', 'LineWidth',1.5);
-plot(stimTime, gammaSig, 'g', 'LineWidth',1.5);
-plot(stimTime, harmonicSig, 'm', 'LineWidth',1.5);
-plot(stimTime, gammaSig + harmonicSig, '--r', 'LineWidth',1.5);
-legend('SingleTrial','Gamma','Harmonic', 'Gamma + Harmonic', 'Location', 'Best');
-xlabel('Time (s)')
-if strcmp(expType, 'Color')
+    plot(freqVals,log10(meanPSDBL)','k','LineWidth',1.5)
+    hold on
+    plot(freqVals,log10(meanPSDST)','r','LineWidth',1.5)
+    plot(freqGamma,log10(meanPSDST(freqVals == freqGamma)),'ro','HandleVisibility','off');
+    text(freqGamma,log10(meanPSDST(freqVals == freqGamma)),[' G = '  num2str(freqGamma) 'Hz']);
+    plot(freqHarmonic,log10(meanPSDST(freqVals == freqHarmonic)),'ro','HandleVisibility','off');
+    text(freqHarmonic,log10(meanPSDST(freqVals == freqHarmonic)),[' H = ' num2str(freqHarmonic) 'Hz']);
+
+    plot(freqVals,log10(psdST(:,trialIndSelected,elecIndSelected))',':b','LineWidth',1.5)
+    plot(singleTrialGamma,log10(psdST((find(freqVals == singleTrialGamma)),trialIndSelected,elecIndSelected)),'bo','HandleVisibility','off');
+    plot(singleTrialHarmonic,log10(psdST((find(freqVals == singleTrialHarmonic)),trialIndSelected,elecIndSelected)),'bo','HandleVisibility','off')
+    legend('BaseLine', 'Stimulus', 'SingleTrial', 'Location', 'Best')
+    xlim([0 150])
+    xlabel('Frequency (Hz)','FontSize', 12); ylabel('log10(PSD)','FontSize', 12);
+    title([subjectName expType '-' stimType ' PSD'])
+    set(gca, 'TickDir', 'out');
+    hold off;
+
+
+    % Raw LFP
+    pos2 = [0.55 0.6 0.4 0.3];
+    subplot('Position',pos2)
+    stimTime = timeVals(stPos);
+    hold on
+    plot(stimTime, stLFP(:,trialIndSelected,elecIndSelected), 'b', 'LineWidth',1.5);
+    plot(stimTime, gammaSig(:,trialIndSelected,elecIndSelected), 'g', 'LineWidth',1.5);
+    plot(stimTime, harmonicSig(:,trialIndSelected,elecIndSelected), 'm', 'LineWidth',1.5);
+    plot(stimTime, gammaSig(:,trialIndSelected,elecIndSelected) + harmonicSig(:,trialIndSelected,elecIndSelected), '--r', 'LineWidth',1.5);
+    legend('LFP','G','H', 'G+H', 'Location', 'Best');
+    xlabel('Time (s)','FontSize', 12)
+    if strcmp(expType, 'Color')
+        xlim([0.25 0.5])
+    elseif  strcmp(expType, 'Length')
+        xlim([0.5 0.75])
+    end
     xlim([0.25 0.5])
-elseif  strcmp(expType, 'Length')
-    xlim([0.5 0.75])
-end
-xlim([0.25 0.5])
-title('Single Trial LFP')
-hold off;
+    title('Single Trial LFP')
+    set(gca, 'TickDir', 'out');
+    hold off;
 
-%%%%%%%%%%%%%%%%%%%%%%%
+    % SingleElectrode SingleTrial
+    subplot(234)
+    rho = RHO(:,trialIndSelected,elecIndSelected);
+    polarplot(theta',rho);
+    title('Single Trial');
 
-% SingleElectrode SingleTrial
-trialIndex = find(goodPos == TrialNum);
-[theta,Rho] = singleElectrodePhase(electrodeNum, goodPos, folderLFP, stPos, blPos, mt, Fs);
-subplot(234)
-rho = Rho(:,trialIndex)';
-polarplot(theta,rho);
-% legend('Trial');
-title(['Elec = ' num2str(electrodeNum) ' Trial = ' num2str(TrialNum)]);
+    % SingleElectrode AllTrials 
+    subplot(235)
+    polarplot(theta',mean(RHO(:,:,elecIndSelected),2));
+    hold on
+    polarplot(theta',mean(RHO(:,selectedTrialIndices,elecIndSelected),2));
+    hold off
+    title('SingleElectrode');
 
-
-% SingleElectrode AllTrials 
-selectSingleElec = 1;
-[theta,Rho,GHpos] = singleElectrodePhase(electrodeNum, goodPos, folderLFP, stPos, blPos, mt, Fs, selectSingleElec);
-subplot(235)
-polarplot(theta',mean(Rho,2));
-hold on
-polarplot(theta',mean(Rho(:,GHpos),2));
-% legend('All', 'Sel');
-hold off
-title(['Elec = ' num2str(electrodeNum)]);
-
-        
-%AllElectrodes AllTrials
-RHO = [];
-for i = 1:length(highRMSElectrodes)
-    electrodeNum = i;
-    dispFlag = 0;
-    [theta,Rho] = singleElectrodePhase(electrodeNum, goodPos, folderLFP, stPos, blPos, mt, Fs);
-    RHO = cat(2,RHO,mean(Rho,2));
-end
-meanRHO = mean(RHO,2); % mean of AllElec AllTrial
-meanRHOselec = mean(RHO(:,elec),2); % mean of AllElec AllTrial
-subplot(236)
-polarplot(theta,meanRHO);
-hold on
-polarplot(theta,meanRHOselec);
-% legend('All', 'Sel');
-hold off
-title(['AllElectrodes AllTrials']);
-saveas(gcf,[subjectID stimType 'PhaseDiff' '.fig'])
-
-
-% meanPSD
-function [freqVals, meanPSDST,meanPSDBL] = meanPSD(highRMSElectrodes, goodPos, folderLFP, stPos, blPos, mt)
-    meanPsdST = []; meanPsdBL = [];
-    for i = 1:length(highRMSElectrodes)
-        load(fullfile(folderLFP,['elec' num2str(i)]),'analogData');
-        stLFP = analogData(goodPos,stPos)';
-        blLFP = analogData(goodPos,blPos)';
-        [psdST,freqVals] = mtspectrumc(stLFP,mt);
-        psdBL = mtspectrumc(blLFP,mt);
-        meanPsdST = cat(2, meanPsdST,mean(psdST,2));
-        meanPsdBL = cat(2, meanPsdBL,mean(psdBL,2));
-    end
-    meanPSDST = mean(meanPsdST,2);
-    meanPSDBL = mean(meanPsdBL,2);
-end
-
-
-% singleElectrodePhase
-function [theta,Rho,GHpos] = singleElectrodePhase(electrodeNum, goodPos, folderLFP, stPos, blPos, mt, Fs, selectSingleElec)
-    if ~exist('selectSingleElec', 'var'); selectSingleElec = 0; end
-    i = electrodeNum;
-    load(fullfile(folderLFP,['elec' num2str(i)]),'analogData');
-    stLFP = analogData(goodPos,stPos)';
-    blLFP = analogData(goodPos,blPos)';
-    [psdST,freqVals] = mtspectrumc(stLFP,mt);
-    psdBL = mtspectrumc(blLFP,mt);
-    BLcorrectedPSD = log10(psdST)-log10(psdBL);
+    %AllElectrodes AllTrials
+    meanRHOall = mean(squeeze((mean(RHO(:,:,:),2))),2);
+    meanRHOselected = mean(squeeze((mean(RHO(:,:,selectedElecIndices),2))),2);
+    subplot(236)
+    polarplot(theta',meanRHOall);
+    hold on
+    polarplot(theta',meanRHOselected);
+    hold off
+    title('AllElectrodes');
     
-    Rho = []; peakGammaFreq = zeros(1,length(goodPos)); peakHarmonicFreq = zeros(1,length(goodPos));
-    for j = 1:length(goodPos)
-        [peakGammaFreq(i,j), peakHarmonicFreq(i,j)] = findGammaPeak(BLcorrectedPSD(:,j), freqVals);
-        [theta, rho] = getGammaPhaseDiff(stLFP(:,j), peakGammaFreq(i,j), peakHarmonicFreq(i,j), Fs);
-        Rho = cat(2,Rho,rho');
-    end
+    saveas(gcf,fullfile(plotsFolder,[subjectName expType stimType 'Fig2' '.fig']))
+    saveas(gcf,fullfile(plotsFolder,[subjectName expType stimType 'Fig2' '.tiff']))
     
-    if selectSingleElec
-         for j = 1:length(goodPos)
-            [peakGammaFreq(j), peakHarmonicFreq(j),gammaAmp(j),harmonicAmp(j)] = findGammaPeak(BLcorrectedPSD(:,j), freqVals);
-            [theta, rho] = getGammaPhaseDiff(stLFP(:,j), peakGammaFreq(j), peakHarmonicFreq(j), Fs);
-
-            thetaPos = find(rho == max(rho));
-            if mean(theta(thetaPos)) >=2.9 && mean(theta(thetaPos)) <= 3.4
-                goodPhase(j) = 1;
-            end
-            Rho = cat(2,Rho,rho');
-         end
-        highGammaAmp = mean(gammaAmp);
-        highHarmonicAamp = mean(harmonicAmp);
-
-        highGammaPos = find(gammaAmp > highGammaAmp);
-        highHarmonicPos = find(harmonicAmp > highHarmonicAamp);
-        goodPhasePos = find(goodPhase == 1);
-
-        GHpos0 = intersect(highHarmonicPos,highGammaPos);
-        GHpos = intersect(GHpos0,goodPhasePos);
-    end
 end
